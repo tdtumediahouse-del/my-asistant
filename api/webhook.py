@@ -100,7 +100,7 @@ def get_history(chat_id):
 def save_history(chat_id, history):
     if not redis_client: return
     try:
-        history = history[-10:] # Faqat oxirgi 10 ta xabar saqlanadi
+        history = history[-20:] # Faqat oxirgi 20 ta xabar saqlanadi
         redis_client.setex(f"history:{chat_id}", 15 * 24 * 3600, json.dumps(history))
     except Exception:
         pass
