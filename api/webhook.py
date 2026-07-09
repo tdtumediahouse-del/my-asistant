@@ -169,7 +169,7 @@ def _gemini(system, messages_history):
 
 
 def generate(messages_history, prefer_gemini=False, sys_prompt=None):
-    \"\"\"Groq/Gemini'dan javob oladi. Biri ishlamasa ikkinchisi. Hech biri bo'lmasa None.\"\"\"
+    """Groq/Gemini'dan javob oladi. Biri ishlamasa ikkinchisi. Hech biri bo'lmasa None."""
     prompt_to_use = sys_prompt if sys_prompt else SYSTEM_PROMPT
     chain = []
     if prefer_gemini:
