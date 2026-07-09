@@ -257,13 +257,30 @@ def process_update(update):
                     if not keys:
                         send_message(chat_id, "Hozircha hech qanday suhbat xotirasi yo'q.")
                         return
-                    for k in keys[:25]: # Vercel timeout bo'lmasligi uchun 25 ta chat bilan cheklaymiz
+                    
+                    # 25 ta chatni olamiz
+                    keys = keys[:25]
+                    uids = [k.split(":")[1] for k in keys]
+                    
+                    # Har bir UID uchun ismni Redis'dan birato'la (mget) tortib olamiz
+                    names = []
+                    try:
+                        names = redis_client.mget([f"user_name:{u}" for u in uids])
+                    except Exception:
+                        names = [None] * len(uids)
+                        
+                    for i, k in enumerate(keys):
                         chat_hist = redis_client.get(k)
                         if chat_hist:
                             if isinstance(chat_hist, str):
                                 chat_hist = json.loads(chat_hist)
-                            uid = k.split(":")[1]
-                            log_text += f"\n--- Mijoz (ID: {uid}) bilan suhbat ---\n"
+                            uid = uids[i]
+                            # Ism bo'lsa ismni, bo'lmasa ID ni olamiz
+                            name = names[i] if i < len(names) and names[i] else f"ID: {uid}"
+                            if isinstance(name, bytes):
+                                name = name.decode("utf-8")
+                                
+                            log_text += f"\n--- Mijoz {name} bilan suhbat ---\n"
                             for msg in chat_hist[-8:]: # Har biridan oxirgi 8 ta xabarni olamiz
                                 role_name = "Mijoz" if msg["role"] == "user" else "Bot"
                                 log_text += f"{role_name}: {msg['content']}\n"
