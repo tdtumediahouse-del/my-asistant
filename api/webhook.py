@@ -12,6 +12,11 @@ import json
 import os
 import urllib.request
 import urllib.error
+import time
+try:
+    from upstash_redis import Redis
+except ImportError:
+    Redis = None
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -76,6 +81,30 @@ QACHON {owner}GA HAVOLA QILASAN:
 
 SYSTEM_PROMPT = build_system_prompt()
 
+UPSTASH_URL = _env("UPSTASH_REDIS_REST_URL")
+UPSTASH_TOKEN = _env("UPSTASH_REDIS_REST_TOKEN")
+redis_client = None
+if Redis and UPSTASH_URL and UPSTASH_TOKEN:
+    redis_client = Redis(url=UPSTASH_URL, token=UPSTASH_TOKEN)
+
+def get_history(chat_id):
+    if not redis_client: return []
+    try:
+        data = redis_client.get(f"history:{chat_id}")
+        if data:
+            return json.loads(data) if isinstance(data, str) else data
+    except Exception:
+        pass
+    return []
+
+def save_history(chat_id, history):
+    if not redis_client: return
+    try:
+        history = history[-10:] # Faqat oxirgi 10 ta xabar saqlanadi
+        redis_client.setex(f"history:{chat_id}", 15 * 24 * 3600, json.dumps(history))
+    except Exception:
+        pass
+
 
 def _post_json(url, payload, headers=None, timeout=30):
     data = json.dumps(payload).encode()
@@ -93,15 +122,14 @@ def _post_json(url, payload, headers=None, timeout=30):
         return json.loads(r.read().decode())
 
 
-def _groq(system, text):
+def _groq(system, messages_history):
+    messages = [{"role": "system", "content": system}]
+    messages.extend(messages_history)
     data = _post_json(
         "https://api.groq.com/openai/v1/chat/completions",
         {
             "model": GROQ_MODEL,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": text},
-            ],
+            "messages": messages,
             "temperature": 0.9,
             "max_tokens": 600,
         },
@@ -110,23 +138,28 @@ def _groq(system, text):
     return data["choices"][0]["message"]["content"].strip()
 
 
-def _gemini(system, text):
+def _gemini(system, messages_history):
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     )
+    contents = []
+    for msg in messages_history:
+        role = "model" if msg["role"] == "assistant" else "user"
+        contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+        
     data = _post_json(
         url,
         {
             "system_instruction": {"parts": [{"text": system}]},
-            "contents": [{"role": "user", "parts": [{"text": text}]}],
+            "contents": contents,
             "generationConfig": {"temperature": 0.9, "maxOutputTokens": 600},
         },
     )
     return data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 
-def generate(text, prefer_gemini=False):
+def generate(messages_history, prefer_gemini=False):
     """Groq/Gemini'dan javob oladi. Biri ishlamasa ikkinchisi. Hech biri bo'lmasa None."""
     chain = []
     if prefer_gemini:
@@ -141,7 +174,7 @@ def generate(text, prefer_gemini=False):
             chain.append(_gemini)
     for fn in chain:
         try:
-            reply = fn(SYSTEM_PROMPT, text)
+            reply = fn(SYSTEM_PROMPT, messages_history)
             if reply:
                 return reply
         except Exception:
@@ -195,7 +228,11 @@ def process_update(update):
             send_message(chat_id, welcome)
         else:
             # Oddiy xabarlarga ham AI sifatida javob beraveradi (sinab ko'rish uchun qulay)
-            reply = generate(text) or FALLBACK_MESSAGE
+            history = get_history(chat_id)
+            history.append({"role": "user", "content": text})
+            reply = generate(history) or FALLBACK_MESSAGE
+            history.append({"role": "assistant", "content": reply})
+            save_history(chat_id, history)
             send_message(chat_id, reply)
         return
 
@@ -209,7 +246,11 @@ def process_update(update):
         return
         
     prefer_gemini = bool(update.get("update_id", 0) % 2)  # yukni ~50/50 taqsimlash
-    reply = generate(text, prefer_gemini) or FALLBACK_MESSAGE
+    history = get_history(chat_id)
+    history.append({"role": "user", "content": text})
+    reply = generate(history, prefer_gemini) or FALLBACK_MESSAGE
+    history.append({"role": "assistant", "content": reply})
+    save_history(chat_id, history)
     send_message(chat_id, reply, bcid)
 
 
