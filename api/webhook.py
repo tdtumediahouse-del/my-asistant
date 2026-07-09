@@ -247,15 +247,31 @@ def process_update(update):
             try:
                 logs_data = redis_client.lrange(f"logs:{today}", 0, -1)
                 logs = [json.loads(x) if isinstance(x, str) else x for x in logs_data] if logs_data else []
+                
+                log_text = ""
+                if logs:
+                    log_text = "\n".join([f"Mijoz ({l.get('user')}): {l.get('text')}\nBot: {l.get('reply')}" for l in logs[-50:]])
+                else:
+                    # Agar bugungi loglar bo'lmasa, eskirgan xotira (history) orqali hisobot yig'amiz
+                    keys = redis_client.keys("history:*")
+                    if not keys:
+                        send_message(chat_id, "Hozircha hech qanday suhbat xotirasi yo'q.")
+                        return
+                    for k in keys[:25]: # Vercel timeout bo'lmasligi uchun 25 ta chat bilan cheklaymiz
+                        chat_hist = redis_client.get(k)
+                        if chat_hist:
+                            if isinstance(chat_hist, str):
+                                chat_hist = json.loads(chat_hist)
+                            uid = k.split(":")[1]
+                            log_text += f"\n--- Mijoz {uid} bilan suhbat ---\n"
+                            for msg in chat_hist[-8:]: # Har biridan oxirgi 8 ta xabarni olamiz
+                                role_name = "Mijoz" if msg["role"] == "user" else "Bot"
+                                log_text += f"{role_name}: {msg['content']}\n"
             except Exception:
-                logs = []
-            
-            if not logs:
-                send_message(chat_id, "Bugun uchun (hozircha) hech qanday suhbat qayd etilmagan.")
+                send_message(chat_id, "Xotirani o'qishda xatolik yuz berdi.")
                 return
                 
-            log_text = "\n".join([f"Mijoz ({l.get('user')}): {l.get('text')}\nBot: {l.get('reply')}" for l in logs[-50:]])
-            sys_prompt = "Bugungi mijozlar bilan suhbatlar tarixi quyida keltirilgan. Buni o'qib chiq va qisqacha, tushunarli tilda kim nima so'ragani va bot nima javob bergani haqida umumiylashtirilgan hisobot tayyorla:\n\n" + log_text
+            sys_prompt = "Quyida mijozlar bilan bo'lgan suhbatlar xotirasi keltirilgan. Buni o'qib chiq va qisqacha, tushunarli tilda kim nima so'ragani va bot nima javob bergani haqida umumiylashtirilgan hisobot tayyorla:\n\n" + log_text
             
             report = generate([], prefer_gemini=True, sys_prompt=sys_prompt)
             if report:
