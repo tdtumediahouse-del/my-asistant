@@ -102,13 +102,13 @@ def save_history(chat_id, history):
         pass
 
 
-def save_log(chat_id, text, reply):
+def save_log(chat_id, name, text, reply):
     if not redis_client: return
     try:
         tashkent_time = time.time() + 5 * 3600
         today = time.strftime("%Y-%m-%d", time.gmtime(tashkent_time))
         key = f"logs:{today}"
-        log_entry = {"time": time.time(), "user": chat_id, "text": text, "reply": reply}
+        log_entry = {"time": time.time(), "user": chat_id, "name": name, "text": text, "reply": reply}
         redis_client.rpush(key, json.dumps(log_entry))
         redis_client.expire(key, 2 * 24 * 3600) # 2 kun
     except Exception:
@@ -250,7 +250,7 @@ def process_update(update):
                 
                 log_text = ""
                 if logs:
-                    log_text = "\n".join([f"Mijoz ({l.get('user')}): {l.get('text')}\nBot: {l.get('reply')}" for l in logs[-50:]])
+                    log_text = "\n".join([f"Mijoz {l.get('name', l.get('user'))}: {l.get('text')}\nBot: {l.get('reply')}" for l in logs[-50:]])
                 else:
                     # Agar bugungi loglar bo'lmasa, eskirgan xotira (history) orqali hisobot yig'amiz
                     keys = redis_client.keys("history:*")
@@ -263,7 +263,7 @@ def process_update(update):
                             if isinstance(chat_hist, str):
                                 chat_hist = json.loads(chat_hist)
                             uid = k.split(":")[1]
-                            log_text += f"\n--- Mijoz {uid} bilan suhbat ---\n"
+                            log_text += f"\n--- Mijoz (ID: {uid}) bilan suhbat ---\n"
                             for msg in chat_hist[-8:]: # Har biridan oxirgi 8 ta xabarni olamiz
                                 role_name = "Mijoz" if msg["role"] == "user" else "Bot"
                                 log_text += f"{role_name}: {msg['content']}\n"
@@ -271,7 +271,13 @@ def process_update(update):
                 send_message(chat_id, "Xotirani o'qishda xatolik yuz berdi.")
                 return
                 
-            sys_prompt = "Quyida mijozlar bilan bo'lgan suhbatlar xotirasi keltirilgan. Buni o'qib chiq va qisqacha, tushunarli tilda kim nima so'ragani va bot nima javob bergani haqida umumiylashtirilgan hisobot tayyorla:\n\n" + log_text
+            sys_prompt = (
+                "Quyida mijozlar bilan bo'lgan suhbatlar xotirasi keltirilgan. Buni o'qib chiqib, quyidagi qoidalarga asosan hisobot tayyorla:\n"
+                "1. 'Ba'zi mijozlar', 'Ko'pchilik' deb umumlashtirma. Har bir mijozni o'zining ism-familiyasi yoki ID raqami bilan alohida ajratib yoz.\n"
+                "2. Ularning eng muhim savollari, muammolari va xabarlaridan aniq iqtiboslar (qo'shtirnoq ichida) keltir.\n"
+                "3. Bot ularga qanday javob berganini qisqacha yoz.\n\n"
+                + log_text
+            )
             
             report = generate([], prefer_gemini=True, sys_prompt=sys_prompt)
             if report:
@@ -318,7 +324,14 @@ def process_update(update):
     reply = generate(history, prefer_gemini) or FALLBACK_MESSAGE
     history.append({"role": "assistant", "content": reply})
     save_history(chat_id, history)
-    save_log(chat_id, text, reply)
+    
+    user_info = msg.get("from") or {}
+    first_name = user_info.get("first_name", "")
+    last_name = user_info.get("last_name", "")
+    username = user_info.get("username", "")
+    full_name = f"{first_name} {last_name}".strip() or username or str(chat_id)
+    
+    save_log(chat_id, full_name, text, reply)
     send_message(chat_id, reply, bcid)
 
 
