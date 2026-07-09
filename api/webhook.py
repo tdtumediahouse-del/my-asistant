@@ -102,6 +102,19 @@ def save_history(chat_id, history):
         pass
 
 
+def save_log(chat_id, text, reply):
+    if not redis_client: return
+    try:
+        tashkent_time = time.time() + 5 * 3600
+        today = time.strftime("%Y-%m-%d", time.gmtime(tashkent_time))
+        key = f"logs:{today}"
+        log_entry = {"time": time.time(), "user": chat_id, "text": text, "reply": reply}
+        redis_client.rpush(key, json.dumps(log_entry))
+        redis_client.expire(key, 2 * 24 * 3600) # 2 kun
+    except Exception:
+        pass
+
+
 def _post_json(url, payload, headers=None, timeout=30):
     data = json.dumps(payload).encode()
     # User-Agent MUHIM: Groq API Cloudflare ortida — urllib ning standart User-Agent'ini
@@ -155,8 +168,9 @@ def _gemini(system, messages_history):
     return data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 
-def generate(messages_history, prefer_gemini=False):
-    """Groq/Gemini'dan javob oladi. Biri ishlamasa ikkinchisi. Hech biri bo'lmasa None."""
+def generate(messages_history, prefer_gemini=False, sys_prompt=None):
+    \"\"\"Groq/Gemini'dan javob oladi. Biri ishlamasa ikkinchisi. Hech biri bo'lmasa None.\"\"\"
+    prompt_to_use = sys_prompt if sys_prompt else SYSTEM_PROMPT
     chain = []
     if prefer_gemini:
         if GEMINI_API_KEY:
@@ -170,7 +184,7 @@ def generate(messages_history, prefer_gemini=False):
             chain.append(_gemini)
     for fn in chain:
         try:
-            reply = fn(SYSTEM_PROMPT, messages_history)
+            reply = fn(prompt_to_use, messages_history)
             if reply:
                 return reply
         except Exception:
@@ -220,6 +234,34 @@ def process_update(update):
 
     # Agar bu botning o'ziga to'g'ridan-to'g'ri yozilgan xabar bo'lsa (Business emas)
     if not is_business:
+        ADMIN_ID = _env("ADMIN_ID")
+        if text == "/hisobot" and str(chat_id) == ADMIN_ID:
+            send_message(chat_id, "Bugungi hisobot tayyorlanmoqda, kuting...")
+            tashkent_time = time.time() + 5 * 3600
+            today = time.strftime("%Y-%m-%d", time.gmtime(tashkent_time))
+            if not redis_client:
+                send_message(chat_id, "Redis ulanmagan.")
+                return
+            try:
+                logs_data = redis_client.lrange(f"logs:{today}", 0, -1)
+                logs = [json.loads(x) if isinstance(x, str) else x for x in logs_data] if logs_data else []
+            except Exception:
+                logs = []
+            
+            if not logs:
+                send_message(chat_id, "Bugun uchun (hozircha) hech qanday suhbat qayd etilmagan.")
+                return
+                
+            log_text = "\n".join([f"Mijoz ({l.get('user')}): {l.get('text')}\nBot: {l.get('reply')}" for l in logs[-50:]])
+            sys_prompt = "Bugungi mijozlar bilan suhbatlar tarixi quyida keltirilgan. Buni o'qib chiq va qisqacha, tushunarli tilda kim nima so'ragani va bot nima javob bergani haqida umumiylashtirilgan hisobot tayyorla:\n\n" + log_text
+            
+            report = generate([], prefer_gemini=True, sys_prompt=sys_prompt)
+            if report:
+                send_message(chat_id, report)
+            else:
+                send_message(chat_id, "Hisobot tayyorlashda xatolik.")
+            return
+
         if text.startswith("/start"):
             welcome = (
                 "Assalomu alaykum! Men yordamchi AI botman.\n\n"
@@ -252,6 +294,7 @@ def process_update(update):
     reply = generate(history, prefer_gemini) or FALLBACK_MESSAGE
     history.append({"role": "assistant", "content": reply})
     save_history(chat_id, history)
+    save_log(chat_id, text, reply)
     send_message(chat_id, reply, bcid)
 
 
