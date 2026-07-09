@@ -213,6 +213,11 @@ def process_update(update):
     if not chat_id:
         return
 
+    if text == "/debug":
+        debug_msg = f"Redis: {bool(redis_client)}, URL: {bool(UPSTASH_URL)}, Token: {bool(UPSTASH_TOKEN)}"
+        send_message(chat_id, debug_msg)
+        return
+
     # Agar bu botning o'ziga to'g'ridan-to'g'ri yozilgan xabar bo'lsa (Business emas)
     if not is_business:
         if text.startswith("/start"):
