@@ -5,6 +5,8 @@ description = "Yordamchi Bot"
 requires-python = ">=3.9"
 dependencies = [
     "python-dotenv>=1.0",
+    "requests",
+    "upstash-redis"
 ]
 
 [tool.vercel]
