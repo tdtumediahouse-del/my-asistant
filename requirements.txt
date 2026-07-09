@@ -1,0 +1,2 @@
+# Vercel (webhook) uchun — faqat shu kerak. Webhook standart kutubxonalarda ishlaydi.
+python-dotenv>=1.0
