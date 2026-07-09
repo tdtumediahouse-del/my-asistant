@@ -192,7 +192,7 @@ def generate(messages_history, prefer_gemini=False, sys_prompt=None):
     return None
 
 
-def send_message(chat_id, text, business_connection_id=None):
+def send_message(chat_id, text, business_connection_id=None, reply_markup=None):
     try:
         payload = {
             "chat_id": chat_id,
@@ -200,6 +200,8 @@ def send_message(chat_id, text, business_connection_id=None):
         }
         if business_connection_id:
             payload["business_connection_id"] = business_connection_id
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
             
         _post_json(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
@@ -235,7 +237,7 @@ def process_update(update):
     # Agar bu botning o'ziga to'g'ridan-to'g'ri yozilgan xabar bo'lsa (Business emas)
     if not is_business:
         ADMIN_ID = _env("ADMIN_ID")
-        if text == "/hisobot" and str(chat_id) == ADMIN_ID:
+        if (text == "/hisobot" or text == "📊 Hisobot") and str(chat_id) == ADMIN_ID:
             send_message(chat_id, "Bugungi hisobot tayyorlanmoqda, kuting...")
             tashkent_time = time.time() + 5 * 3600
             today = time.strftime("%Y-%m-%d", time.gmtime(tashkent_time))
@@ -268,7 +270,13 @@ def process_update(update):
                 "Meni ishlashim uchun Telegram sozlamalaridan 'Telegram Business' bo'limiga kiring "
                 "va meni ulab oling. Shundan so'ng mijozlaringizga sizning o'rningizga javob berishni boshlayman!"
             )
-            send_message(chat_id, welcome)
+            reply_markup = None
+            if str(chat_id) == ADMIN_ID:
+                reply_markup = {
+                    "keyboard": [[{"text": "📊 Hisobot"}]],
+                    "resize_keyboard": True
+                }
+            send_message(chat_id, welcome, reply_markup=reply_markup)
         else:
             # Oddiy xabarlarga ham AI sifatida javob beraveradi (sinab ko'rish uchun qulay)
             history = get_history(chat_id)
