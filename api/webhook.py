@@ -320,7 +320,23 @@ def process_update(update):
             # Oddiy xabarlarga ham AI sifatida javob beraveradi (sinab ko'rish uchun qulay)
             history = get_history(chat_id)
             history.append({"role": "user", "content": text})
-            reply = generate(history) or FALLBACK_MESSAGE
+            reply = generate(history)
+            if reply:
+                if redis_client:
+                    try: redis_client.delete(f"fallback_lock:{chat_id}")
+                    except: pass
+            else:
+                is_locked = False
+                if redis_client:
+                    try: is_locked = bool(redis_client.get(f"fallback_lock:{chat_id}"))
+                    except: pass
+                if is_locked:
+                    return
+                reply = FALLBACK_MESSAGE
+                if redis_client:
+                    try: redis_client.setex(f"fallback_lock:{chat_id}", 900, "1")
+                    except: pass
+                    
             history.append({"role": "assistant", "content": reply})
             save_history(chat_id, history)
             send_message(chat_id, reply)
@@ -338,7 +354,27 @@ def process_update(update):
     prefer_gemini = bool(update.get("update_id", 0) % 2)  # yukni ~50/50 taqsimlash
     history = get_history(chat_id)
     history.append({"role": "user", "content": text})
-    reply = generate(history, prefer_gemini) or FALLBACK_MESSAGE
+    reply = generate(history, prefer_gemini)
+    if reply:
+        # API ishladi, blokni olib tashlaymiz
+        if redis_client:
+            try: redis_client.delete(f"fallback_lock:{chat_id}")
+            except: pass
+    else:
+        # API ishlamadi (kalit xato yoki limit tugagan). Spam qilib bezovta qilmaslik uchun tekshiramiz:
+        is_locked = False
+        if redis_client:
+            try: is_locked = bool(redis_client.get(f"fallback_lock:{chat_id}"))
+            except: pass
+            
+        if is_locked:
+            return  # 15 daqiqa ichida takrorlansa, umuman javob yozmaymiz (spam blok)
+            
+        reply = FALLBACK_MESSAGE
+        if redis_client:
+            try: redis_client.setex(f"fallback_lock:{chat_id}", 900, "1") # 15 daqiqaga bloklaymiz
+            except: pass
+
     history.append({"role": "assistant", "content": reply})
     save_history(chat_id, history)
     
